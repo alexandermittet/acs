@@ -490,4 +490,89 @@ public class StockManagerTest {
 			((StockManagerHTTPProxy) storeManager).stop();
 		}
 	}
+
+	@Test
+	public void testGetBooksInDemand() throws BookStoreException {
+		// Add some additional books
+		Set<StockBook> booksToAdd = new HashSet<StockBook>();
+		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 1, "Book1", "Author1", 10.0f, 1, 0, 0, 0, false));
+		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 2, "Book2", "Author2", 10.0f, 2, 0, 0, 0, false));
+		storeManager.addBooks(booksToAdd);
+
+		// Try to buy more copies than available to create sale misses
+		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
+		booksToBuy.add(new BookCopy(TEST_ISBN + 1, 2)); // Try to buy 2 copies when only 1 exists
+		
+		try {
+			client.buyBooks(booksToBuy);
+			fail();
+		} catch (BookStoreException ex) {
+			// Expected exception
+		}
+
+		// Get books in demand
+		List<StockBook> booksInDemand = storeManager.getBooksInDemand();
+		
+		// Should only contain the book that had a sale miss
+		assertEquals(1, booksInDemand.size());
+		assertEquals(TEST_ISBN + 1, (int) booksInDemand.get(0).getISBN());
+		assertEquals(1, booksInDemand.get(0).getNumSaleMisses());
+	}
+
+	@Test
+	public void testGetBooksInDemandNoMisses() throws BookStoreException {
+		// Add some additional books
+		Set<StockBook> booksToAdd = new HashSet<StockBook>();
+		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 1, "Book1", "Author1", 10.0f, 5, 0, 0, 0, false));
+		storeManager.addBooks(booksToAdd);
+
+		// Buy books successfully (no misses)
+		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
+		booksToBuy.add(new BookCopy(TEST_ISBN + 1, 1));
+		client.buyBooks(booksToBuy);
+
+		// Get books in demand
+		List<StockBook> booksInDemand = storeManager.getBooksInDemand();
+		
+		// Should be empty since there were no sale misses
+		assertEquals(0, booksInDemand.size());
+	}
+
+	@Test
+	public void testGetBooksInDemandMultipleMisses() throws BookStoreException {
+		// Add some additional books with low stock
+		Set<StockBook> booksToAdd = new HashSet<StockBook>();
+		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 1, "Book1", "Author1", 10.0f, 1, 0, 0, 0, false));
+		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 2, "Book2", "Author2", 10.0f, 1, 0, 0, 0, false));
+		storeManager.addBooks(booksToAdd);
+
+		// Try to buy more copies than available for both books
+		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
+		booksToBuy.add(new BookCopy(TEST_ISBN + 1, 2));
+		booksToBuy.add(new BookCopy(TEST_ISBN + 2, 3));
+		
+		try {
+			client.buyBooks(booksToBuy);
+			fail();
+		} catch (BookStoreException ex) {
+			// Expected exception
+		}
+
+		// Get books in demand
+		List<StockBook> booksInDemand = storeManager.getBooksInDemand();
+		
+		// Should contain both books that had sale misses
+		assertEquals(2, booksInDemand.size());
+		
+		// Verify sale misses were recorded correctly
+		for (StockBook book : booksInDemand) {
+			if (book.getISBN() == TEST_ISBN + 1) {
+				assertEquals(1, book.getNumSaleMisses()); // Tried to buy 1 more than available
+			} else if (book.getISBN() == TEST_ISBN + 2) {
+				assertEquals(2, book.getNumSaleMisses()); // Tried to buy 2 more than available
+			} else {
+				fail("Unexpected book in demand: " + book.getISBN());
+			}
+		}
+	}
 }
