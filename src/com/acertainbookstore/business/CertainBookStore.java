@@ -317,7 +317,20 @@ public class CertainBookStore implements BookStore, StockManager {
 	 */
 	@Override
 	public synchronized List<Book> getTopRatedBooks(int numBooks) throws BookStoreException {
-		throw new BookStoreException();
+		if (numBooks < 0) {
+			throw new BookStoreException("numBooks = " + numBooks + ", but it must be positive");
+		}
+
+		// Get all books sorted by rating
+		List<BookStoreBook> sortedBooks = bookMap.values().stream()
+			.sorted((b1, b2) -> Double.compare(b2.getAverageRating(), b1.getAverageRating()))
+			.collect(Collectors.toList());
+
+		// Return at most numBooks books
+		int numBooksToReturn = Math.min(numBooks, sortedBooks.size());
+		return sortedBooks.subList(0, numBooksToReturn).stream()
+			.map(book -> book.immutableBook())
+			.collect(Collectors.toList());
 	}
 
 	/*
@@ -337,7 +350,25 @@ public class CertainBookStore implements BookStore, StockManager {
 	 */
 	@Override
 	public synchronized void rateBooks(Set<BookRating> bookRating) throws BookStoreException {
-		throw new BookStoreException();
+		if (bookRating == null) {
+			throw new BookStoreException(BookStoreConstants.NULL_INPUT);
+		}
+
+		// First validate all books exist and ratings are valid
+		for (BookRating rating : bookRating) {
+			validateISBNInStock(rating.getISBN());
+			
+			// Validate rating is between 0 and 5
+			if (rating.getRating() < 0 || rating.getRating() > 5) {
+				throw new BookStoreException(BookStoreConstants.RATING + rating.getRating() + BookStoreConstants.INVALID);
+			}
+		}
+
+		// Then update all ratings
+		for (BookRating rating : bookRating) {
+			BookStoreBook book = bookMap.get(rating.getISBN());
+			book.addRating(rating.getRating());
+		}
 	}
 
 	/*
