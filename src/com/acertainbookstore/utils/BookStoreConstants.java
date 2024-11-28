@@ -17,7 +17,7 @@ public final class BookStoreConstants {
 	public static final String BOOKISBN_PARAM = "ISBN";
 
 	/** The Constant BOOK_NUM_PARAM. */
-	public static final String BOOK_NUM_PARAM = "number_of_books";
+	public static final String BOOK_NUM_PARAM = "numBooks";
 
 	/** The Constant XMLSTRINGLEN_PARAM. */
 	public static final String XMLSTRINGLEN_PARAM = "len";
