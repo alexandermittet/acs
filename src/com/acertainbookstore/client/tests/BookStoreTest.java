@@ -350,6 +350,72 @@ public class BookStoreTest {
 				&& booksInStorePreTest.size() == booksInStorePostTest.size());
 	}
 
+	@Test
+	public void testBuyZeroCopies() throws BookStoreException {
+		List<StockBook> booksInStorePreTest = storeManager.getBooks();
+	
+		// Try to buy zero copies of the book.
+		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
+		booksToBuy.add(new BookCopy(TEST_ISBN, 0));
+	
+		try {
+			client.buyBooks(booksToBuy);
+			fail("Should not be able to buy zero copies of a book.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	
+		List<StockBook> booksInStorePostTest = storeManager.getBooks();
+	
+		// Verify that the inventory remains unchanged.
+		assertTrue(booksInStorePreTest.equals(booksInStorePostTest));
+	}
+
+	@Test
+	public void testBuyMultipleBooks() throws BookStoreException {
+		// Add another book to the store.
+		Set<StockBook> booksToAdd = new HashSet<StockBook>();
+		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 1, "Second Book", "Author 2", 15.0f, NUM_COPIES, 0, 0, 0, false));
+		storeManager.addBooks(booksToAdd);
+	
+		// Prepare books to buy.
+		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
+		booksToBuy.add(new BookCopy(TEST_ISBN, 1));
+		booksToBuy.add(new BookCopy(TEST_ISBN + 1, 2));
+	
+		// Attempt to buy multiple books.
+		client.buyBooks(booksToBuy);
+	
+		// Verify that the number of copies has been updated correctly.
+		List<StockBook> booksInStore = storeManager.getBooks();
+		for (StockBook book : booksInStore) {
+			if (book.getISBN() == TEST_ISBN) {
+				assertEquals(NUM_COPIES - 1, book.getNumCopies());
+			} else if (book.getISBN() == TEST_ISBN + 1) {
+				assertEquals(NUM_COPIES - 2, book.getNumCopies());
+			}
+		}
+	}
+	
+	@Test
+	public void testBuyRemovedBook() throws BookStoreException {
+		// Remove the book from the store.
+		Set<Integer> isbnsToRemove = new HashSet<Integer>();
+		isbnsToRemove.add(TEST_ISBN);
+		storeManager.removeBooks(isbnsToRemove);
+	
+		// Attempt to buy the removed book.
+		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
+		booksToBuy.add(new BookCopy(TEST_ISBN, 1));
+	
+		try {
+			client.buyBooks(booksToBuy);
+			fail("Should not be able to buy a removed book.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	}
+
 	/**
 	 * Tear down after class.
 	 *

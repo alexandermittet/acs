@@ -475,6 +475,109 @@ public class StockManagerTest {
 		assertTrue(booksInStoreList.size() == 0);
 	}
 
+	@Test
+	public void testAddBookWithZeroCopies() throws BookStoreException {
+		Set<StockBook> booksToAdd = new HashSet<StockBook>();
+		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 1, "Zero Copies Book", "Author", 10.0f, 0, 0, 0, 0, false));
+	
+		try {
+			storeManager.addBooks(booksToAdd);
+			fail("Should not be able to add a book with zero copies.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	}
+
+	@Test
+	public void testAddBookWithNullTitleOrAuthor() throws BookStoreException {
+		// Test with null title.
+		Set<StockBook> booksWithNullTitle = new HashSet<StockBook>();
+		booksWithNullTitle.add(new ImmutableStockBook(TEST_ISBN + 1, null, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false));
+	
+		try {
+			storeManager.addBooks(booksWithNullTitle);
+			fail("Should not be able to add a book with a null title.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	
+		// Test with null author.
+		Set<StockBook> booksWithNullAuthor = new HashSet<StockBook>();
+		booksWithNullAuthor.add(new ImmutableStockBook(TEST_ISBN + 2, "Title", null, 10.0f, NUM_COPIES, 0, 0, 0, false));
+	
+		try {
+			storeManager.addBooks(booksWithNullAuthor);
+			fail("Should not be able to add a book with a null author.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	}
+
+	@Test
+	public void testAddBookWithExistingISBN() throws BookStoreException {
+		Set<StockBook> booksToAdd = new HashSet<StockBook>();
+		booksToAdd.add(new ImmutableStockBook(TEST_ISBN, "Duplicate ISBN Book", "Author", 15.0f, NUM_COPIES, 0, 0, 0, false));
+	
+		try {
+			storeManager.addBooks(booksToAdd);
+			fail("Should not be able to add a book with an existing ISBN.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	}
+
+	@Test
+	public void testUpdateEditorPicksInvalidISBN() throws BookStoreException {
+		Set<BookEditorPick> editorPicks = new HashSet<BookEditorPick>();
+		editorPicks.add(new BookEditorPick(-1, true)); // Invalid ISBN
+	
+		try {
+			storeManager.updateEditorPicks(editorPicks);
+			fail("Should not be able to update editor picks with invalid ISBNs.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	}
+
+	@Test
+	public void testRemoveBooksInvalidISBN() throws BookStoreException {
+		Set<Integer> isbnsToRemove = new HashSet<Integer>();
+		isbnsToRemove.add(-1); // Invalid ISBN
+	
+		try {
+			storeManager.removeBooks(isbnsToRemove);
+			fail("Should not be able to remove books with invalid ISBNs.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	}
+
+	@Test
+	public void testAddCopiesZeroCopies() throws BookStoreException {
+		Set<BookCopy> bookCopiesSet = new HashSet<BookCopy>();
+		bookCopiesSet.add(new BookCopy(TEST_ISBN, 0));
+	
+		try {
+			storeManager.addCopies(bookCopiesSet);
+			fail("Should not be able to add zero copies of a book.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	}
+
+	@Test
+	public void testGetBooksByInvalidISBN() throws BookStoreException {
+		Set<Integer> isbnSet = new HashSet<Integer>();
+		isbnSet.add(-1); // Invalid ISBN
+	
+		try {
+			storeManager.getBooksByISBN(isbnSet);
+			fail("Should not be able to get books with invalid ISBNs.");
+		} catch (BookStoreException ex) {
+			// Expected exception.
+		}
+	}
+
 	/**
 	 * Tear down after class.
 	 *
