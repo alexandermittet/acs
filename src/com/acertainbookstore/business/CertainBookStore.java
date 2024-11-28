@@ -340,7 +340,11 @@ public class CertainBookStore implements BookStore, StockManager {
 	 */
 	@Override
 	public synchronized List<StockBook> getBooksInDemand() throws BookStoreException {
-		throw new BookStoreException();
+		// Return books that have had sale misses
+		return bookMap.values().stream()
+			.filter(book -> book.getNumSaleMisses() > 0)
+			.map(book -> book.immutableStockBook())
+			.collect(Collectors.toList());
 	}
 
 	/*

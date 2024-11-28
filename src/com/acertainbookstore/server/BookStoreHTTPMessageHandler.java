@@ -16,6 +16,7 @@ import com.acertainbookstore.business.BookCopy;
 import com.acertainbookstore.business.BookEditorPick;
 import com.acertainbookstore.business.CertainBookStore;
 import com.acertainbookstore.business.StockBook;
+import com.acertainbookstore.business.BookRating;
 import com.acertainbookstore.utils.BookStoreKryoSerializer;
 import com.acertainbookstore.interfaces.BookStoreSerializer;
 import com.acertainbookstore.utils.BookStoreXStreamSerializer;
@@ -25,6 +26,7 @@ import com.acertainbookstore.utils.BookStoreMessageTag;
 import com.acertainbookstore.utils.BookStoreResponse;
 import com.acertainbookstore.utils.BookStoreUtility;
 import com.esotericsoftware.kryo.io.Input;
+
 
 /**
  * {@link BookStoreHTTPMessageHandler} implements the message handler class
@@ -136,6 +138,17 @@ public class BookStoreHTTPMessageHandler extends AbstractHandler {
 
 			case GETTOPRATEDBOOKS:
 				getTopRatedBooks(request, response);
+				break;
+
+			case GETBOOKSINDEMAND:
+				BookStoreResponse bookStoreResponse = new BookStoreResponse();
+				try {
+					bookStoreResponse.setList(myBookStore.getBooksInDemand());
+				} catch (BookStoreException ex) {
+					bookStoreResponse.setException(ex);
+				}
+				byte[] serializedResponseContent = serializer.get().serialize(bookStoreResponse);
+				response.getOutputStream().write(serializedResponseContent);
 				break;
 
 			default:
