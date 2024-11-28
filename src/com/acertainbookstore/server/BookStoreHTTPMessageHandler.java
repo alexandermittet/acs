@@ -16,6 +16,7 @@ import com.acertainbookstore.business.BookCopy;
 import com.acertainbookstore.business.BookEditorPick;
 import com.acertainbookstore.business.CertainBookStore;
 import com.acertainbookstore.business.StockBook;
+import com.acertainbookstore.business.BookRating;
 import com.acertainbookstore.utils.BookStoreKryoSerializer;
 import com.acertainbookstore.interfaces.BookStoreSerializer;
 import com.acertainbookstore.utils.BookStoreXStreamSerializer;
@@ -25,6 +26,7 @@ import com.acertainbookstore.utils.BookStoreMessageTag;
 import com.acertainbookstore.utils.BookStoreResponse;
 import com.acertainbookstore.utils.BookStoreUtility;
 import com.esotericsoftware.kryo.io.Input;
+
 
 /**
  * {@link BookStoreHTTPMessageHandler} implements the message handler class
@@ -139,7 +141,14 @@ public class BookStoreHTTPMessageHandler extends AbstractHandler {
 				break;
 
 			case GETBOOKSINDEMAND:
-				getBooksInDemand(response);
+				BookStoreResponse bookStoreResponse = new BookStoreResponse();
+				try {
+					bookStoreResponse.setList(myBookStore.getBooksInDemand());
+				} catch (BookStoreException ex) {
+					bookStoreResponse.setException(ex);
+				}
+				byte[] serializedResponseContent = serializer.get().serialize(bookStoreResponse);
+				response.getOutputStream().write(serializedResponseContent);
 				break;
 
 			default:
@@ -459,20 +468,6 @@ public class BookStoreHTTPMessageHandler extends AbstractHandler {
 		} catch (BookStoreException ex) {
 			bookStoreResponse.setException(ex);
 		}
-
-		byte[] serializedResponseContent = serializer.get().serialize(bookStoreResponse);
-		response.getOutputStream().write(serializedResponseContent);
-	}
-
-	/**
-	 * Gets the books in demand.
-	 *
-	 * @param response the response
-	 * @throws IOException Signals that an I/O exception has occurred.
-	 */
-	private void getBooksInDemand(HttpServletResponse response) throws IOException {
-		BookStoreResponse bookStoreResponse = new BookStoreResponse();
-		bookStoreResponse.setList(myBookStore.getBooksInDemand());
 
 		byte[] serializedResponseContent = serializer.get().serialize(bookStoreResponse);
 		response.getOutputStream().write(serializedResponseContent);
