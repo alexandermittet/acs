@@ -38,5 +38,6 @@
 	<classpathentry kind="lib" path="lib/jetty-all-9.4.11.v20180605-uber.jar"/>
 	<classpathentry kind="lib" path="lib/kryo-4.0.2.jar"/>
 	<classpathentry kind="lib" path="lib/xstream-1.4.10.jar"/>
+	<classpathentry excluding="src/" kind="src" path=""/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
