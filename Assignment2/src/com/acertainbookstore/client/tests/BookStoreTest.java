@@ -57,7 +57,7 @@ public class BookStoreTest {
 	/** Single lock test */
 	private static boolean singleLock = true;
 
-	
+
 	/** The store manager. */
 	private static StockManager storeManager;
 
@@ -394,26 +394,29 @@ public class BookStoreTest {
 
 	@Test // Concurrency control
 	public void testConcurrentBuyAndAdd() throws Exception {
-		// Create initial book
+		// Create initial book with unique ISBN and more copies
 		Set<StockBook> booksToAdd = new HashSet<>();
-		StockBook book = new ImmutableStockBook(TEST_ISBN, "Test Book", "Test Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
+		StockBook book = new ImmutableStockBook(TEST_ISBN + 100, "Test Book", "Test Author", 10.0f, NUM_COPIES * NUM_OPERATIONS, 0, 0, 0, false);
 		booksToAdd.add(book);
 		storeManager.addBooks(booksToAdd);
 
-		// Create threads for buying and adding
 		CountDownLatch startLatch = new CountDownLatch(1);
 		CountDownLatch endLatch = new CountDownLatch(2);
 		
 		Set<BookCopy> booksToBuy = new HashSet<>();
-		booksToBuy.add(new BookCopy(TEST_ISBN, 1));
+		booksToBuy.add(new BookCopy(TEST_ISBN + 100, 1));
 		
 		Thread buyerThread = new Thread(() -> {
 			try {
 				startLatch.await();
 				for (int i = 0; i < NUM_OPERATIONS; i++) {
-					client.buyBooks(booksToBuy);
+					try {
+						client.buyBooks(booksToBuy);
+					} catch (BookStoreException e) {
+						fail("Book should be available: " + e.getMessage());
+					}
 				}
-			} catch (Exception e) {
+			} catch (InterruptedException e) {
 				fail(e.getMessage());
 			} finally {
 				endLatch.countDown();
@@ -424,37 +427,39 @@ public class BookStoreTest {
 			try {
 				startLatch.await();
 				for (int i = 0; i < NUM_OPERATIONS; i++) {
-					storeManager.addCopies(booksToBuy);
+					try {
+						storeManager.addCopies(booksToBuy);
+					} catch (BookStoreException e) {
+						fail("Should be able to add copies: " + e.getMessage());
+					}
 				}
-			} catch (Exception e) {
+			} catch (InterruptedException e) {
 				fail(e.getMessage());
 			} finally {
 				endLatch.countDown();
 			}
 		});
 
-		// Start threads
 		buyerThread.start();
 		adderThread.start();
 		startLatch.countDown();
 		
-		// Wait for completion
 		assertTrue("Test timed out", endLatch.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
 	}
 
 	@Test // Consistency
 	public void testConsistentSnapshots() throws Exception {
-		// Setup initial books
+		// Setup initial books with unique ISBNs
 		Set<StockBook> booksToAdd = new HashSet<>();
 		for (int i = 0; i < 3; i++) {
-			StockBook book = new ImmutableStockBook(TEST_ISBN + i, "Book " + i, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
+			StockBook book = new ImmutableStockBook(TEST_ISBN + 200 + i, "Book " + i, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
 			booksToAdd.add(book);
 		}
 		storeManager.addBooks(booksToAdd);
 
 		Set<Integer> isbnSet = new HashSet<>();
 		for (int i = 0; i < 3; i++) {
-			isbnSet.add(TEST_ISBN + i);
+			isbnSet.add(TEST_ISBN + 200 + i);
 		}
 
 		for (int i = 0; i < NUM_OPERATIONS; i++) {
@@ -470,10 +475,10 @@ public class BookStoreTest {
 
 	@Test // Reader concurrency
 	public void testConcurrentReaders() throws Exception {
-		// Setup initial books
+		// Setup initial books with unique ISBNs
 		Set<StockBook> booksToAdd = new HashSet<>();
 		for (int i = 0; i < 5; i++) {
-			StockBook book = new ImmutableStockBook(TEST_ISBN + i, "Book " + i, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
+			StockBook book = new ImmutableStockBook(TEST_ISBN + 300 + i, "Book " + i, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
 			booksToAdd.add(book);
 		}
 		storeManager.addBooks(booksToAdd);
@@ -503,10 +508,11 @@ public class BookStoreTest {
 
 	@Test // Deadlock prevention
 	public void testDeadlockPrevention() throws Exception {
-		// Setup initial books
+		// Setup initial books with unique ISBNs and more copies
 		Set<StockBook> booksToAdd = new HashSet<>();
 		for (int i = 0; i < 2; i++) {
-			StockBook book = new ImmutableStockBook(TEST_ISBN + i, "Book " + i, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
+			StockBook book = new ImmutableStockBook(TEST_ISBN + 400 + i, "Book " + i, "Author", 10.0f, 
+				NUM_COPIES * NUM_OPERATIONS, 0, 0, 0, false);
 			booksToAdd.add(book);
 		}
 		storeManager.addBooks(booksToAdd);
@@ -520,11 +526,15 @@ public class BookStoreTest {
 				startLatch.await();
 				for (int i = 0; i < NUM_OPERATIONS; i++) {
 					Set<BookCopy> booksToBuy = new HashSet<>();
-					booksToBuy.add(new BookCopy(TEST_ISBN, 1));
-					booksToBuy.add(new BookCopy(TEST_ISBN + 1, 1));
-					client.buyBooks(booksToBuy);
+					booksToBuy.add(new BookCopy(TEST_ISBN + 400, 1));
+					booksToBuy.add(new BookCopy(TEST_ISBN + 401, 1));
+					try {
+						client.buyBooks(booksToBuy);
+					} catch (BookStoreException e) {
+						fail("Books should be available: " + e.getMessage());
+					}
 				}
-			} catch (Exception e) {
+			} catch (InterruptedException e) {
 				fail(e.getMessage());
 			} finally {
 				endLatch.countDown();
@@ -537,11 +547,15 @@ public class BookStoreTest {
 				startLatch.await();
 				for (int i = 0; i < NUM_OPERATIONS; i++) {
 					Set<BookCopy> booksToBuy = new HashSet<>();
-					booksToBuy.add(new BookCopy(TEST_ISBN + 1, 1));
-					booksToBuy.add(new BookCopy(TEST_ISBN, 1));
-					client.buyBooks(booksToBuy);
+					booksToBuy.add(new BookCopy(TEST_ISBN + 401, 1));
+					booksToBuy.add(new BookCopy(TEST_ISBN + 400, 1));
+					try {
+						client.buyBooks(booksToBuy);
+					} catch (BookStoreException e) {
+						fail("Books should be available: " + e.getMessage());
+					}
 				}
-			} catch (Exception e) {
+			} catch (InterruptedException e) {
 				fail(e.getMessage());
 			} finally {
 				endLatch.countDown();
