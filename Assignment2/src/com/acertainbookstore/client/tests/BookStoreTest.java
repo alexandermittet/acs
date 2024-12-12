@@ -2,8 +2,11 @@ package com.acertainbookstore.client.tests;
 
 import static org.junit.Assert.*;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -16,6 +19,7 @@ import org.junit.Test;
 
 import com.acertainbookstore.business.Book;
 import com.acertainbookstore.business.BookCopy;
+import com.acertainbookstore.business.BookEditorPick;
 import com.acertainbookstore.business.SingleLockConcurrentCertainBookStore;
 import com.acertainbookstore.business.ImmutableStockBook;
 import com.acertainbookstore.business.StockBook;
@@ -38,7 +42,7 @@ public class BookStoreTest {
 	private static final int TEST_ISBN = 3044560;
 
 	/** The Constant NUM_COPIES. */
-	private static final int NUM_COPIES = 5;
+	private static final int NUM_COPIES = 100;
 
 	/** The local test. */
 	private static boolean localTest = true;
@@ -364,7 +368,7 @@ public class BookStoreTest {
 		assertTrue(booksInStorePreTest.containsAll(booksInStorePostTest)
 				&& booksInStorePreTest.size() == booksInStorePostTest.size());
 	}
-	
+
 	/**
 	 * Test 1 (Concurrency):
 	 * Two clients (C1 and C2) concurrently operate on the same book:
@@ -477,6 +481,196 @@ public class BookStoreTest {
 		startLatch.countDown();
 		doneLatch.await();
 	}
+
+    /**
+     * Test 3 (Additional):
+     * Multiple readers and writers:
+     * Readers continuously call getBooks and getBooksByISBN,
+     * Writers alternate between buyBooks and updateEditorPicks.
+     */
+    @Test
+    public void testMultipleReadersAndWriters() throws Exception {
+        final int READERS = 3;
+        final int WRITERS = 2;
+        final int ITERATIONS = 30;
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final CountDownLatch doneLatch = new CountDownLatch(READERS + WRITERS);
+
+        Set<Integer> isbnSet = new HashSet<>();
+        isbnSet.add(TEST_ISBN);
+
+        Runnable reader = () -> {
+            try {
+                startLatch.await();
+                for (int i = 0; i < ITERATIONS; i++) {
+                    List<StockBook> allBooks = storeManager.getBooks();
+                    assertNotNull(allBooks);
+
+                    List<StockBook> certainBooks = storeManager.getBooksByISBN(isbnSet);
+                    assertNotNull(certainBooks);
+                    assertFalse(certainBooks.isEmpty());
+                }
+            } catch (Exception e) {
+                fail("Reader failed: " + e.getMessage());
+            } finally {
+                doneLatch.countDown();
+            }
+        };
+
+        Runnable writer = () -> {
+            try {
+                startLatch.await();
+                for (int i = 0; i < ITERATIONS; i++) {
+                    if (i % 2 == 0) {
+                        // buy one copy
+                        Set<BookCopy> toBuy = new HashSet<>();
+                        toBuy.add(new BookCopy(TEST_ISBN, 1));
+                        client.buyBooks(toBuy);
+                    } else {
+                        // update editor picks
+                        Set<BookEditorPick> picks = new HashSet<>();
+                        picks.add(new BookEditorPick(TEST_ISBN, true));
+                        storeManager.updateEditorPicks(picks);
+                    }
+                }
+            } catch (Exception e) {
+                fail("Writer failed: " + e.getMessage());
+            } finally {
+                doneLatch.countDown();
+            }
+        };
+
+        for (int i = 0; i < READERS; i++) {
+            new Thread(reader).start();
+        }
+        for (int i = 0; i < WRITERS; i++) {
+            new Thread(writer).start();
+        }
+
+        startLatch.countDown();
+        doneLatch.await();
+
+        // Just ensure no exceptions were thrown and final state is consistent
+        List<StockBook> finalBooks = storeManager.getBooks();
+        assertFalse(finalBooks.isEmpty());
+    }
+
+    /**
+     * Test 4 (Additional):
+     * Concurrently add and remove books while other threads are buying and reading.
+     * Ensures no invalid states or exceptions occur.
+     */
+    @Test
+    public void testConcurrentAddRemoveAndAccess() throws Exception {
+        // Add extra book for complexity
+        int extraISBN = TEST_ISBN + 100;
+        storeManager.addBooks(Collections.singleton(new ImmutableStockBook(extraISBN, "Extra Book", "Author", 10f, 5, 0, 0, 0, false)));
+
+        final int ADDERS = 1;
+        final int REMOVERS = 1;
+        final int BUYERS = 1;
+        final int READERS = 1;
+        final int TOTAL = ADDERS + REMOVERS + BUYERS + READERS;
+        final int ITERATIONS = 20;
+
+        final Set<Integer> dynamicISBNs = Collections.synchronizedSet(new HashSet<>(Arrays.asList(TEST_ISBN, extraISBN)));
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final CountDownLatch doneLatch = new CountDownLatch(TOTAL);
+
+        Runnable adder = () -> {
+            try {
+                startLatch.await();
+                for (int i = 0; i < ITERATIONS; i++) {
+                    int newIsbn = TEST_ISBN + 200 + i;
+                    storeManager.addBooks(Collections.singleton(new ImmutableStockBook(newIsbn, "NewBook" + newIsbn, "A", 5f, 5, 0, 0, 0, false)));
+                    dynamicISBNs.add(newIsbn);
+                }
+            } catch (Exception e) {
+                fail("Adder failed: " + e.getMessage());
+            } finally {
+                doneLatch.countDown();
+            }
+        };
+
+        Runnable remover = () -> {
+            try {
+                startLatch.await();
+                for (int i = 0; i < ITERATIONS; i++) {
+                    synchronized (dynamicISBNs) {
+                        if (!dynamicISBNs.isEmpty()) {
+                            Integer[] arr = dynamicISBNs.toArray(new Integer[0]);
+                            Integer toRemove = arr[new Random().nextInt(arr.length)];
+                            try {
+                                storeManager.removeBooks(Collections.singleton(toRemove));
+                                dynamicISBNs.remove(toRemove);
+                            } catch (BookStoreException ignore) {
+                                // might fail if book not found at removal time
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                fail("Remover failed: " + e.getMessage());
+            } finally {
+                doneLatch.countDown();
+            }
+        };
+
+        Runnable buyer = () -> {
+            try {
+                startLatch.await();
+                for (int i = 0; i < ITERATIONS; i++) {
+                    Set<BookCopy> toBuy = new HashSet<>();
+                    synchronized (dynamicISBNs) {
+                        for (Integer isbn : dynamicISBNs) {
+                            toBuy.add(new BookCopy(isbn, 1));
+                        }
+                    }
+                    if (!toBuy.isEmpty()) {
+                        try {
+                            client.buyBooks(toBuy);
+                        } catch (BookStoreException ignore) {
+                            // If not enough copies, no problem
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                fail("Buyer failed: " + e.getMessage());
+            } finally {
+                doneLatch.countDown();
+            }
+        };
+
+        Runnable reader = () -> {
+            try {
+                startLatch.await();
+                for (int i = 0; i < ITERATIONS; i++) {
+                    List<StockBook> snapshot = storeManager.getBooks();
+                    for (StockBook b : snapshot) {
+                        assertTrue("Negative copies found!", b.getNumCopies() >= 0);
+                    }
+                }
+            } catch (Exception e) {
+                fail("Reader failed: " + e.getMessage());
+            } finally {
+                doneLatch.countDown();
+            }
+        };
+
+        new Thread(adder).start();
+        new Thread(remover).start();
+        new Thread(buyer).start();
+        new Thread(reader).start();
+
+        startLatch.countDown();
+        doneLatch.await();
+
+        // If we got here, no exceptions or inconsistencies were caught
+        List<StockBook> finalSnapshot = storeManager.getBooks();
+        for (StockBook b : finalSnapshot) {
+            assertTrue("Negative copies found in the end!", b.getNumCopies() >= 0);
+        }
+    }
 
 
 	@AfterClass
