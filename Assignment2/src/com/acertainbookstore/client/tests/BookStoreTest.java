@@ -5,6 +5,10 @@ import static org.junit.Assert.*;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -32,11 +36,20 @@ import com.acertainbookstore.utils.BookStoreException;
  */
 public class BookStoreTest {
 
-	/** The Constant TEST_ISBN. */
+	/** The constant TEST_ISBN. */
 	private static final int TEST_ISBN = 3044560;
 
-	/** The Constant NUM_COPIES. */
+	/** The constant NUM_COPIES. */
 	private static final int NUM_COPIES = 5;
+
+	/** Number of operations to perform in concurrent tests */
+	private static final int NUM_OPERATIONS = 100;
+
+	/** Number of threads to use in concurrent tests */
+	private static final int NUM_THREADS = 10;
+
+	/** Timeout in seconds for concurrent tests */
+	private static final int TIMEOUT_SECONDS = 10;
 
 	/** The local test. */
 	private static boolean localTest = true;
@@ -377,5 +390,170 @@ public class BookStoreTest {
 			((BookStoreHTTPProxy) client).stop();
 			((StockManagerHTTPProxy) storeManager).stop();
 		}
+	}
+
+	@Test // Concurrency control
+	public void testConcurrentBuyAndAdd() throws Exception {
+		// Create initial book
+		Set<StockBook> booksToAdd = new HashSet<>();
+		StockBook book = new ImmutableStockBook(TEST_ISBN, "Test Book", "Test Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
+		booksToAdd.add(book);
+		storeManager.addBooks(booksToAdd);
+
+		// Create threads for buying and adding
+		CountDownLatch startLatch = new CountDownLatch(1);
+		CountDownLatch endLatch = new CountDownLatch(2);
+		
+		Set<BookCopy> booksToBuy = new HashSet<>();
+		booksToBuy.add(new BookCopy(TEST_ISBN, 1));
+		
+		Thread buyerThread = new Thread(() -> {
+			try {
+				startLatch.await();
+				for (int i = 0; i < NUM_OPERATIONS; i++) {
+					client.buyBooks(booksToBuy);
+				}
+			} catch (Exception e) {
+				fail(e.getMessage());
+			} finally {
+				endLatch.countDown();
+			}
+		});
+
+		Thread adderThread = new Thread(() -> {
+			try {
+				startLatch.await();
+				for (int i = 0; i < NUM_OPERATIONS; i++) {
+					storeManager.addCopies(booksToBuy);
+				}
+			} catch (Exception e) {
+				fail(e.getMessage());
+			} finally {
+				endLatch.countDown();
+			}
+		});
+
+		// Start threads
+		buyerThread.start();
+		adderThread.start();
+		startLatch.countDown();
+		
+		// Wait for completion
+		assertTrue("Test timed out", endLatch.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+	}
+
+	@Test // Consistency
+	public void testConsistentSnapshots() throws Exception {
+		// Setup initial books
+		Set<StockBook> booksToAdd = new HashSet<>();
+		for (int i = 0; i < 3; i++) {
+			StockBook book = new ImmutableStockBook(TEST_ISBN + i, "Book " + i, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
+			booksToAdd.add(book);
+		}
+		storeManager.addBooks(booksToAdd);
+
+		Set<Integer> isbnSet = new HashSet<>();
+		for (int i = 0; i < 3; i++) {
+			isbnSet.add(TEST_ISBN + i);
+		}
+
+		for (int i = 0; i < NUM_OPERATIONS; i++) {
+			List<StockBook> books = storeManager.getBooksByISBN(isbnSet);
+			int firstCopies = books.get(0).getNumCopies();
+			
+			// All books should have the same number of copies
+			for (StockBook book : books) {
+				assertEquals("Inconsistent snapshot detected", firstCopies, book.getNumCopies());
+			}
+		}
+	}
+
+	@Test // Reader concurrency
+	public void testConcurrentReaders() throws Exception {
+		// Setup initial books
+		Set<StockBook> booksToAdd = new HashSet<>();
+		for (int i = 0; i < 5; i++) {
+			StockBook book = new ImmutableStockBook(TEST_ISBN + i, "Book " + i, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
+			booksToAdd.add(book);
+		}
+		storeManager.addBooks(booksToAdd);
+
+		ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS);
+		CountDownLatch endLatch = new CountDownLatch(NUM_THREADS);
+
+		// Launch multiple reader threads
+		for (int i = 0; i < NUM_THREADS; i++) {
+			executor.submit(() -> {
+				try {
+					for (int j = 0; j < NUM_OPERATIONS; j++) {
+						List<StockBook> books = storeManager.getBooks();
+						assertEquals(5, books.size());
+					}
+				} catch (Exception e) {
+					fail(e.getMessage());
+				} finally {
+					endLatch.countDown();
+				}
+			});
+		}
+
+		assertTrue("Test timed out", endLatch.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+		executor.shutdown();
+	}
+
+	@Test // Deadlock prevention
+	public void testDeadlockPrevention() throws Exception {
+		// Setup initial books
+		Set<StockBook> booksToAdd = new HashSet<>();
+		for (int i = 0; i < 2; i++) {
+			StockBook book = new ImmutableStockBook(TEST_ISBN + i, "Book " + i, "Author", 10.0f, NUM_COPIES, 0, 0, 0, false);
+			booksToAdd.add(book);
+		}
+		storeManager.addBooks(booksToAdd);
+
+		CountDownLatch startLatch = new CountDownLatch(1);
+		CountDownLatch endLatch = new CountDownLatch(2);
+
+		// Thread 1: Buys books in order ISBN1, ISBN2
+		Thread thread1 = new Thread(() -> {
+			try {
+				startLatch.await();
+				for (int i = 0; i < NUM_OPERATIONS; i++) {
+					Set<BookCopy> booksToBuy = new HashSet<>();
+					booksToBuy.add(new BookCopy(TEST_ISBN, 1));
+					booksToBuy.add(new BookCopy(TEST_ISBN + 1, 1));
+					client.buyBooks(booksToBuy);
+				}
+			} catch (Exception e) {
+				fail(e.getMessage());
+			} finally {
+				endLatch.countDown();
+			}
+		});
+
+		// Thread 2: Buys books in order ISBN2, ISBN1
+		Thread thread2 = new Thread(() -> {
+			try {
+				startLatch.await();
+				for (int i = 0; i < NUM_OPERATIONS; i++) {
+					Set<BookCopy> booksToBuy = new HashSet<>();
+					booksToBuy.add(new BookCopy(TEST_ISBN + 1, 1));
+					booksToBuy.add(new BookCopy(TEST_ISBN, 1));
+					client.buyBooks(booksToBuy);
+				}
+			} catch (Exception e) {
+				fail(e.getMessage());
+			} finally {
+				endLatch.countDown();
+			}
+		});
+
+		// Start threads
+		thread1.start();
+		thread2.start();
+		startLatch.countDown();
+		
+		// Test passes if it completes without deadlock
+		assertTrue("Test timed out (possible deadlock)", endLatch.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
 	}
 }
