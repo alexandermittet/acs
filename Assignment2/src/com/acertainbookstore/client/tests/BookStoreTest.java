@@ -5,6 +5,8 @@ import static org.junit.Assert.*;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -362,13 +364,121 @@ public class BookStoreTest {
 		assertTrue(booksInStorePreTest.containsAll(booksInStorePostTest)
 				&& booksInStorePreTest.size() == booksInStorePostTest.size());
 	}
+	
+	/**
+	 * Test 1 (Concurrency):
+	 * Two clients (C1 and C2) concurrently operate on the same book:
+	 * - C1 repeatedly buys 1 copy
+	 * - C2 repeatedly adds 1 copy
+	 * After a fixed number of operations, the stock should remain the same as initially.
+	 */
+	@Test
+	public void testConcurrentBuyAndAddCopies() throws Exception {
+		final int operationsPerThread = 50;
+		final CountDownLatch startLatch = new CountDownLatch(1);
+		final CountDownLatch doneLatch = new CountDownLatch(2);
+
+		Runnable buyer = () -> {
+			try {
+				startLatch.await();
+				for (int i = 0; i < operationsPerThread; i++) {
+					Set<BookCopy> toBuy = new HashSet<>();
+					toBuy.add(new BookCopy(TEST_ISBN, 1));
+					client.buyBooks(toBuy);
+				}
+			} catch (Exception e) {
+				fail("Buyer thread exception: " + e.getMessage());
+			} finally {
+				doneLatch.countDown();
+			}
+		};
+
+		Runnable adder = () -> {
+			try {
+				startLatch.await();
+				for (int i = 0; i < operationsPerThread; i++) {
+					Set<BookCopy> toAdd = new HashSet<>();
+					toAdd.add(new BookCopy(TEST_ISBN, 1));
+					storeManager.addCopies(toAdd);
+				}
+			} catch (Exception e) {
+				fail("Adder thread exception: " + e.getMessage());
+			} finally {
+				doneLatch.countDown();
+			}
+		};
+
+		new Thread(buyer).start();
+		new Thread(adder).start();
+
+		startLatch.countDown();
+		doneLatch.await();
+
+		// After equal number of buys and adds, stock should remain the same
+		List<StockBook> finalBooks = storeManager.getBooks();
+		StockBook book = finalBooks.get(0);
+		assertEquals("Final stock should match initial stock", NUM_COPIES, book.getNumCopies());
+	}
+
 
 	/**
-	 * Tear down after class.
-	 *
-	 * @throws BookStoreException
-	 *             the book store exception
+	 * Test 2 (Concurrency):
+	 * One thread (C1) cycles the stock of a book between full (NUM_COPIES) and NUM_COPIES-1
+	 * by buying and then replenishing.
+	 * Another thread (C2) continuously calls getBooks to ensure snapshots are always consistent
+	 * (all at NUM_COPIES or all at NUM_COPIES-1, never partial).
 	 */
+	@Test
+	public void testConsistentSnapshotsDuringBuyAndReplenish() throws Exception {
+		final int iterations = 50;
+		final AtomicBoolean stopFlag = new AtomicBoolean(false);
+		final CountDownLatch startLatch = new CountDownLatch(1);
+		final CountDownLatch doneLatch = new CountDownLatch(2);
+
+		Runnable stateCycler = () -> {
+			try {
+				startLatch.await();
+				for (int i = 0; i < iterations; i++) {
+					Set<BookCopy> toBuy = new HashSet<>();
+					toBuy.add(new BookCopy(TEST_ISBN, 1));
+					client.buyBooks(toBuy); // now NUM_COPIES - 1
+
+					Set<BookCopy> toAdd = new HashSet<>();
+					toAdd.add(new BookCopy(TEST_ISBN, 1));
+					storeManager.addCopies(toAdd); // back to NUM_COPIES
+				}
+			} catch (Exception e) {
+				fail("StateCycler failed: " + e.getMessage());
+			} finally {
+				stopFlag.set(true);
+				doneLatch.countDown();
+			}
+		};
+
+		Runnable checker = () -> {
+			try {
+				startLatch.await();
+				while (!stopFlag.get()) {
+					List<StockBook> snapshot = storeManager.getBooks();
+					int copies = snapshot.get(0).getNumCopies();
+					assertTrue("Copies should be either full or full-1",
+							copies == NUM_COPIES || copies == NUM_COPIES - 1);
+				}
+			} catch (Exception e) {
+				fail("Checker failed: " + e.getMessage());
+			} finally {
+				doneLatch.countDown();
+			}
+		};
+
+		new Thread(stateCycler).start();
+		new Thread(checker).start();
+
+		startLatch.countDown();
+		doneLatch.await();
+	}
+
+
 	@AfterClass
 	public static void tearDownAfterClass() throws BookStoreException {
 		storeManager.removeAllBooks();
