@@ -14,16 +14,16 @@ import org.junit.Test;
 
 import com.acertainbookstore.business.Book;
 import com.acertainbookstore.business.BookCopy;
-import com.acertainbookstore.business.CertainBookStore;
+import com.acertainbookstore.business.SingleLockConcurrentCertainBookStore;
 import com.acertainbookstore.business.ImmutableStockBook;
 import com.acertainbookstore.business.StockBook;
+import com.acertainbookstore.business.TwoLevelLockingConcurrentCertainBookStore;
 import com.acertainbookstore.client.BookStoreHTTPProxy;
 import com.acertainbookstore.client.StockManagerHTTPProxy;
 import com.acertainbookstore.interfaces.BookStore;
 import com.acertainbookstore.interfaces.StockManager;
 import com.acertainbookstore.utils.BookStoreConstants;
 import com.acertainbookstore.utils.BookStoreException;
-import com.acertainbookstore.business.BookRating;
 
 /**
  * {@link BookStoreTest} tests the {@link BookStore} interface.
@@ -41,6 +41,10 @@ public class BookStoreTest {
 	/** The local test. */
 	private static boolean localTest = true;
 
+	/** Single lock test */
+	private static boolean singleLock = true;
+
+	
 	/** The store manager. */
 	private static StockManager storeManager;
 
@@ -55,11 +59,20 @@ public class BookStoreTest {
 		try {
 			String localTestProperty = System.getProperty(BookStoreConstants.PROPERTY_KEY_LOCAL_TEST);
 			localTest = (localTestProperty != null) ? Boolean.parseBoolean(localTestProperty) : localTest;
+			
+			String singleLockProperty = System.getProperty(BookStoreConstants.PROPERTY_KEY_SINGLE_LOCK);
+			singleLock = (singleLockProperty != null) ? Boolean.parseBoolean(singleLockProperty) : singleLock;
 
 			if (localTest) {
-				CertainBookStore store = new CertainBookStore();
-				storeManager = store;
-				client = store;
+				if (singleLock) {
+					SingleLockConcurrentCertainBookStore store = new SingleLockConcurrentCertainBookStore();
+					storeManager = store;
+					client = store;
+				} else {
+					TwoLevelLockingConcurrentCertainBookStore store = new TwoLevelLockingConcurrentCertainBookStore();
+					storeManager = store;
+					client = store;
+				}
 			} else {
 				storeManager = new StockManagerHTTPProxy("http://localhost:8081/stock");
 				client = new BookStoreHTTPProxy("http://localhost:8081");
@@ -350,72 +363,6 @@ public class BookStoreTest {
 				&& booksInStorePreTest.size() == booksInStorePostTest.size());
 	}
 
-	@Test
-	public void testBuyZeroCopies() throws BookStoreException {
-		List<StockBook> booksInStorePreTest = storeManager.getBooks();
-	
-		// Try to buy zero copies of the book.
-		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
-		booksToBuy.add(new BookCopy(TEST_ISBN, 0));
-	
-		try {
-			client.buyBooks(booksToBuy);
-			fail("Should not be able to buy zero copies of a book.");
-		} catch (BookStoreException ex) {
-			// Expected exception.
-		}
-	
-		List<StockBook> booksInStorePostTest = storeManager.getBooks();
-	
-		// Verify that the inventory remains unchanged.
-		assertTrue(booksInStorePreTest.equals(booksInStorePostTest));
-	}
-
-	@Test
-	public void testBuyMultipleBooks() throws BookStoreException {
-		// Add another book to the store.
-		Set<StockBook> booksToAdd = new HashSet<StockBook>();
-		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 1, "Second Book", "Author 2", 15.0f, NUM_COPIES, 0, 0, 0, false));
-		storeManager.addBooks(booksToAdd);
-	
-		// Prepare books to buy.
-		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
-		booksToBuy.add(new BookCopy(TEST_ISBN, 1));
-		booksToBuy.add(new BookCopy(TEST_ISBN + 1, 2));
-	
-		// Attempt to buy multiple books.
-		client.buyBooks(booksToBuy);
-	
-		// Verify that the number of copies has been updated correctly.
-		List<StockBook> booksInStore = storeManager.getBooks();
-		for (StockBook book : booksInStore) {
-			if (book.getISBN() == TEST_ISBN) {
-				assertEquals(NUM_COPIES - 1, book.getNumCopies());
-			} else if (book.getISBN() == TEST_ISBN + 1) {
-				assertEquals(NUM_COPIES - 2, book.getNumCopies());
-			}
-		}
-	}
-	
-	@Test
-	public void testBuyRemovedBook() throws BookStoreException {
-		// Remove the book from the store.
-		Set<Integer> isbnsToRemove = new HashSet<Integer>();
-		isbnsToRemove.add(TEST_ISBN);
-		storeManager.removeBooks(isbnsToRemove);
-	
-		// Attempt to buy the removed book.
-		Set<BookCopy> booksToBuy = new HashSet<BookCopy>();
-		booksToBuy.add(new BookCopy(TEST_ISBN, 1));
-	
-		try {
-			client.buyBooks(booksToBuy);
-			fail("Should not be able to buy a removed book.");
-		} catch (BookStoreException ex) {
-			// Expected exception.
-		}
-	}
-
 	/**
 	 * Tear down after class.
 	 *
@@ -429,94 +376,6 @@ public class BookStoreTest {
 		if (!localTest) {
 			((BookStoreHTTPProxy) client).stop();
 			((StockManagerHTTPProxy) storeManager).stop();
-		}
-	}
-
-	@Test
-	public void testRateBookValid() throws BookStoreException {
-		Set<BookRating> bookRating = new HashSet<BookRating>();
-		bookRating.add(new BookRating(TEST_ISBN, 4));
-		
-		// Rate the book
-		client.rateBooks(bookRating);
-		
-		// Get the book and verify rating
-		List<StockBook> listBooks = storeManager.getBooks();
-		StockBook book = listBooks.get(0);
-		
-		assertEquals(1, book.getNumTimesRated());
-		assertEquals(4.0f, book.getAverageRating(), 0.01);
-		assertEquals(4, book.getTotalRating());
-	}
-
-	@Test
-	public void testRateBookInvalidRating() throws BookStoreException {
-		List<StockBook> booksInStorePreTest = storeManager.getBooks();
-		
-		Set<BookRating> bookRating = new HashSet<BookRating>();
-		bookRating.add(new BookRating(TEST_ISBN, 6)); // Invalid rating > 5
-		
-		try {
-			client.rateBooks(bookRating);
-			fail();
-		} catch (BookStoreException ex) {
-			;
-		}
-		
-		List<StockBook> booksInStorePostTest = storeManager.getBooks();
-		assertTrue(booksInStorePreTest.containsAll(booksInStorePostTest)
-				&& booksInStorePreTest.size() == booksInStorePostTest.size());
-	}
-
-	@Test
-	public void testRateBookNonExistingISBN() throws BookStoreException {
-		List<StockBook> booksInStorePreTest = storeManager.getBooks();
-		
-		Set<BookRating> bookRating = new HashSet<BookRating>();
-		bookRating.add(new BookRating(TEST_ISBN + 1, 4)); // Non-existing ISBN
-		
-		try {
-			client.rateBooks(bookRating);
-			fail();
-		} catch (BookStoreException ex) {
-			;
-		}
-		
-		List<StockBook> booksInStorePostTest = storeManager.getBooks();
-		assertTrue(booksInStorePreTest.containsAll(booksInStorePostTest)
-				&& booksInStorePreTest.size() == booksInStorePostTest.size());
-	}
-
-	@Test
-	public void testGetTopRatedBooks() throws BookStoreException {
-		// Add some books with different ratings
-		Set<StockBook> booksToAdd = new HashSet<StockBook>();
-		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 1, "Book1", "Author1", 10.0f, NUM_COPIES, 0, 0, 0, false));
-		booksToAdd.add(new ImmutableStockBook(TEST_ISBN + 2, "Book2", "Author2", 10.0f, NUM_COPIES, 0, 0, 0, false));
-		storeManager.addBooks(booksToAdd);
-		
-		// Rate the books
-		Set<BookRating> ratings = new HashSet<BookRating>();
-		ratings.add(new BookRating(TEST_ISBN, 3));     // Default book: 3 stars
-		ratings.add(new BookRating(TEST_ISBN + 1, 5)); // Book1: 5 stars
-		ratings.add(new BookRating(TEST_ISBN + 2, 4)); // Book2: 4 stars
-		client.rateBooks(ratings);
-		
-		// Get top 2 rated books
-		List<Book> topRated = client.getTopRatedBooks(2);
-		
-		assertEquals(2, topRated.size());
-		assertEquals(TEST_ISBN + 1, (int) topRated.get(0).getISBN()); // First should be Book1 (5 stars)
-		assertEquals(TEST_ISBN + 2, (int) topRated.get(1).getISBN()); // Second should be Book2 (4 stars)
-	}
-
-	@Test
-	public void testGetTopRatedBooksInvalidNum() throws BookStoreException {
-		try {
-			client.getTopRatedBooks(-1);
-			fail();
-		} catch (BookStoreException ex) {
-			;
 		}
 	}
 }

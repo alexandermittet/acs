@@ -577,23 +577,6 @@ public class StockManagerTest {
 			// Expected exception.
 		}
 	}
-
-	/**
-	 * Tear down after class.
-	 *
-	 * @throws BookStoreException
-	 *             the book store exception
-	 */
-	@AfterClass
-	public static void tearDownAfterClass() throws BookStoreException {
-		storeManager.removeAllBooks();
-
-		if (!localTest) {
-			((BookStoreHTTPProxy) client).stop();
-			((StockManagerHTTPProxy) storeManager).stop();
-		}
-	}
-
 	@Test
 	public void testGetBooksInDemand() throws BookStoreException {
 		// Add some additional books
@@ -676,6 +659,22 @@ public class StockManagerTest {
 			} else {
 				fail("Unexpected book in demand: " + book.getISBN());
 			}
+		}
+	}
+	
+	/**
+	 * Tear down after class.
+	 *
+	 * @throws BookStoreException
+	 *             the book store exception
+	 */
+	@AfterClass
+	public static void tearDownAfterClass() throws BookStoreException {
+		storeManager.removeAllBooks();
+
+		if (!localTest) {
+			((BookStoreHTTPProxy) client).stop();
+			((StockManagerHTTPProxy) storeManager).stop();
 		}
 	}
 }
